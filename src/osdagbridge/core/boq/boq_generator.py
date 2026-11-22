@@ -11,6 +11,10 @@ from osdagbridge.core.utils.common import (
     KEY_TS_NO_OF_GIRDERS,
     KEY_TS_DECK_THICKNESS,
     KEY_TS_GIRDER_SPACING,
+    KEY_MP_ED_TYPE,
+    KEY_MP_ED_BRACING_TYPE,
+    KEY_MP_ED_TOP_CHORD,
+    KEY_MP_ED_BOTTOM_CHORD,
 )
 
 logger = logging.getLogger("osdagbridge.core.boq_generator")
@@ -65,6 +69,12 @@ def calculate_material_quantities(inputs: dict, outputs: dict) -> dict:
         "bracing_diag_vol_total": "N.A.",
         "bracing_diag_wt_single": "N.A.",
         "bracing_diag_wt_total": "N.A.",
+
+        "end_diaphragm_vol_formula": "N.A.",
+        "end_diaphragm_qty": "N.A.",
+        "end_diaphragm_vol_total": "N.A.",
+        "end_diaphragm_wt_single": "N.A.",
+        "end_diaphragm_wt_total": "N.A.",
         
         "concrete_deck_vol_formula": r"\placeholder{Width $\times$ Thickness $\times$ Length}",
         "concrete_deck_qty": "N.A.",
@@ -329,6 +339,72 @@ def calculate_material_quantities(inputs: dict, outputs: dict) -> dict:
                 quantities[f"{prefix}_vol_total"] = "N.A."
                 quantities[f"{prefix}_wt_single"] = "N.A."
                 quantities[f"{prefix}_wt_total"] = "N.A."
+
+        # 5d. End diaphragms: use the section mass and length already resolved
+        # by the transverse-member designer; each pair is present at both ends.
+        end_diaphragm_mass_kg = 0.0
+        end_diaphragm_present = False
+        ed_sections = (
+            (
+                "transverse_member_design.ed.section_properties.end_diaphragm",
+                "diagonal",
+            ),
+            (
+                "transverse_member_design.ed.section_properties.top_chord",
+                "top_chord",
+            ),
+            (
+                "transverse_member_design.ed.section_properties.bottom_chord",
+                "bottom_chord",
+            ),
+        )
+        for pair_index in range(1, n_girders):
+            pair_id = f"G{pair_index}G{pair_index + 1}"
+            member_suffix = f".{pair_id}.E{pair_index}M1"
+            ed_type = inputs.get(f"{KEY_MP_ED_TYPE}{member_suffix}")
+            if not ed_type:
+                member_suffix = f".{pair_id}.E{pair_index}M2"
+                ed_type = inputs.get(f"{KEY_MP_ED_TYPE}{member_suffix}")
+            if not ed_type:
+                continue
+
+            for section_prefix, member in ed_sections:
+                if ed_type != "Cross Bracing" and member != "diagonal":
+                    continue
+                if ed_type == "Cross Bracing" and member == "top_chord":
+                    enabled = inputs.get(f"{KEY_MP_ED_TOP_CHORD}{member_suffix}", True)
+                    if str(enabled).strip().lower() in ("no", "false", "0"):
+                        continue
+                if ed_type == "Cross Bracing" and member == "bottom_chord":
+                    enabled = inputs.get(f"{KEY_MP_ED_BOTTOM_CHORD}{member_suffix}", True)
+                    if str(enabled).strip().lower() in ("no", "false", "0"):
+                        continue
+
+                base = f"{section_prefix}.{pair_id}"
+                try:
+                    section_mass = float(outputs.get(f"{base}.M") or 0.0)
+                    section_length = float(outputs.get(f"{base}.L") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if section_mass <= 0.0 or section_length <= 0.0:
+                    continue
+
+                member_count = 2 if member == "diagonal" and ed_type == "Cross Bracing" else 1
+                end_diaphragm_mass_kg += section_mass * section_length * member_count * 2
+                end_diaphragm_present = True
+
+        if end_diaphragm_present:
+            end_diaphragm_volume = end_diaphragm_mass_kg / 7850.0
+            diaphragm_count = (n_girders - 1) * 2
+            quantities["end_diaphragm_vol_formula"] = (
+                f"Section mass and length over {diaphragm_count} end-diaphragm bays"
+            )
+            quantities["end_diaphragm_qty"] = str(diaphragm_count)
+            quantities["end_diaphragm_vol_total"] = f"{end_diaphragm_volume:.3f}"
+            quantities["end_diaphragm_wt_single"] = (
+                f"{end_diaphragm_mass_kg / diaphragm_count / 1000.0:.3f}"
+            )
+            quantities["end_diaphragm_wt_total"] = f"{end_diaphragm_mass_kg / 1000.0:.3f}"
 
         # 6. Crash Barrier (Cu.m) and Weight (MT)
         KEY_CB_AREA = "typical_section.crash_barrier.area"

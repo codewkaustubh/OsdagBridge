@@ -34,6 +34,7 @@ from osdagbridge.core.utils.common import (
     KEY_SL_VERTICAL_COEFF,
     KEY_SL_ZONE_FACTOR,
     KEY_SPAN,
+    KEY_TS_NO_OF_FOOTPATHS,
     KEY_TL_BRIDGE_TEMP_MAX,
     KEY_TL_BRIDGE_TEMP_MIN,
     KEY_TL_HIGHEST_MAX_TEMP,
@@ -54,36 +55,41 @@ from osdagbridge.core.utils.common import (
 )
 
 from osdagbridge.core.reports.report_utils import _tex, _render_value
+from osdagbridge.core.reports.styles import TABLE_ROW_VERTICAL_PADDING, longtable_begin
 
 def ch3_loads(input_dict):
-    # Live load vehicle names mapping
-    vehicles = []
-    if input_dict.get(KEY_LL_IRC_CLASS_A):
-        vehicles.append("Class A")
-    if input_dict.get(KEY_LL_IRC_70R_WHEELED):
-        vehicles.append("Class 70R (Wheeled)")
-    if input_dict.get(KEY_LL_IRC_70R_TRACKED):
-        vehicles.append("Class 70R (Tracked)")
-    if input_dict.get(KEY_LL_IRC_AA_WHEELED):
-        vehicles.append("Class AA (Wheeled)")
-    if input_dict.get(KEY_LL_IRC_AA_TRACKED):
-        vehicles.append("Class AA (Tracked)")
-    if input_dict.get(KEY_LL_IRC_CLASS_SV):
-        vehicles.append("Class SV")
-    if input_dict.get(KEY_LL_IRC_70R_BOGIE):
-        vehicles.append("Class 70R (Bogie)")
-    if input_dict.get(KEY_LL_IRC_CLASS_FATIGUE):
-        vehicles.append("Class Fatigue")
+    vehicle_rows = []
+    standard_vehicles = (
+        (KEY_LL_IRC_CLASS_A, "Class A"),
+        (KEY_LL_IRC_70R_WHEELED, "Class 70R (Wheeled)"),
+        (KEY_LL_IRC_70R_TRACKED, "Class 70R (Tracked)"),
+        (KEY_LL_IRC_AA_WHEELED, "Class AA (Wheeled)"),
+        (KEY_LL_IRC_AA_TRACKED, "Class AA (Tracked)"),
+        (KEY_LL_IRC_CLASS_SV, "Class SV"),
+        (KEY_LL_IRC_70R_BOGIE, "Class 70R (Bogie)"),
+        (KEY_LL_IRC_CLASS_FATIGUE, "Class Fatigue"),
+    )
+    for key, label in standard_vehicles:
+        if input_dict.get(key):
+            vehicle_rows.append((label, "IRC 6 prescribed model", "IRC 6"))
     
     custom = input_dict.get(KEY_LL_CUSTOM_VEHICLES)
     if custom and isinstance(custom, list):
         for c in custom:
             if isinstance(c, dict) and c.get('name'):
-                vehicles.append(c['name'])
+                if c.get("included", True):
+                    axle_loads = c.get("axle_loads") or [
+                        axle.get("load_kN")
+                        for axle in c.get("axles", [])
+                        if isinstance(axle, dict) and axle.get("load_kN") is not None
+                    ]
+                    detail = (
+                        "Axle loads: " + ", ".join(str(load) for load in axle_loads)
+                        if axle_loads else "Custom axle configuration"
+                    )
+                    vehicle_rows.append((c["name"], detail, "kN/axle"))
             elif isinstance(c, str):
-                vehicles.append(c)
-                
-    vehicles_str = ", ".join(vehicles) if vehicles else "None"
+                vehicle_rows.append((c, "Custom vehicle", "As configured"))
 
     from osdagbridge.core.utils.codes.irc6_2017 import IRC6_2017
     span = input_dict.get(KEY_SPAN)
@@ -132,7 +138,14 @@ def ch3_loads(input_dict):
 
     fp_mode  = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_MODE, "")
     fp_value = input_dict.get(KEY_LL_FOOTPATH_PRESSURE_VALUE, "")
-    if str(fp_mode).strip().lower() in ("as per irc 6", "as per irc6", "automatic"):
+    try:
+        footpath_count = max(0, int(input_dict.get(KEY_TS_NO_OF_FOOTPATHS, 0) or 0))
+    except (TypeError, ValueError):
+        footpath_count = 0
+    has_footpath_setting = footpath_count > 0 or fp_value not in (None, "")
+    if not has_footpath_setting:
+        fp_str = "N/A"
+    elif str(fp_mode).strip().lower() in ("as per irc 6", "as per irc6", "automatic"):
         try:
             fp_str = f"{IRC6_2017.cl_206_1_footway_load():.3f} kN/m² (IRC 6 Cl. 206.1)"
         except Exception:
@@ -141,6 +154,50 @@ def ch3_loads(input_dict):
         fp_str = f"{fp_value} kN/m²"
     else:
         fp_str = "N/A"
+
+    footpath_label = (
+        f"{footpath_count} footpath{'s' if footpath_count != 1 else ''}"
+        if footpath_count
+        else ("Configured footpath" if fp_value not in (None, "") else "Not configured")
+    )
+    fp_value_tex = (
+        _tex(fp_str.split(" kN/m", 1)[0]) if fp_str != "N/A" else "N/A"
+    )
+
+    vehicle_rows_tex = [
+        _tex(name) + " & " + _tex(details) + " & " + _tex(unit)
+        + r" \\[" + TABLE_ROW_VERTICAL_PADDING + "]"
+        for name, details, unit in vehicle_rows
+    ] or [
+        r"None selected & --- & --- \\" + "[" + TABLE_ROW_VERTICAL_PADDING + "]"
+    ]
+    vehicle_table = longtable_begin(
+        "|L{4.4cm}|L{7.5cm}|C{3.0cm}|",
+        [r"\textbf{Vehicle / Class} & \textbf{Load Details} & \textbf{Load Unit} \\"],
+        caption=r"\textbf{Vehicle Live Loads (LL)}",
+        body="\n".join(vehicle_rows_tex),
+    )
+    footpath_table = longtable_begin(
+        "|L{5.0cm}|C{6.5cm}|C{3.4cm}|",
+        [r"\textbf{Footpath Setting} & \textbf{Live Load Pressure} & \textbf{Unit} \\"],
+        caption=r"\textbf{Footpath / Footway Live Loads}",
+        body=(
+            _tex(footpath_label) + " & " + fp_value_tex
+            + r" & kN/m\textsuperscript{2} \\["
+            + TABLE_ROW_VERTICAL_PADDING + "]"
+        ),
+    )
+    ll_factors_table = longtable_begin(
+        "|L{5.0cm}|p{9.9cm}|",
+        [r"\textbf{Parameter} & \textbf{Value} \\"],
+        caption=r"\textbf{Live Load Design Factors}",
+        body=(
+            r"\textnormal{Impact Factor (IRC 6)} & " + _tex(impact_factor_str)
+            + r" \\[" + TABLE_ROW_VERTICAL_PADDING + "]" + "\n"
+            + r"\textnormal{Braking Load (IRC 6)} & " + _tex(braking_force_str)
+            + r" \\[" + TABLE_ROW_VERTICAL_PADDING + "]"
+        ),
+    )
 
     # Vz / Pz — prefer stored computed values; fall back to IRC6 Table 12
     vz_val = input_dict.get(KEY_WL_HOURLY_MEAN_WIND)
@@ -300,21 +357,11 @@ This section summarizes all loads applied to the bridge and the load combination
 \end{longtable}
 
 \vspace{1em}
-\begin{longtable}{|L{5.5cm}|p{10.0cm}|}
-\caption{\textbf{Live Loads (LL)}}
-\hline
-\textbf{parameter} & \textbf{value} \\
-\hline
-\textnormal{Vehicles Considered} & """ + _tex(vehicles_str) + r""" \\[6pt]
-\hline
-\textnormal{Impact Factor (IRC 6)} & """ + _tex(impact_factor_str) + r""" \\[6pt]
-\hline
-\textnormal{Braking Load (IRC 6)} & """ + _tex(braking_force_str) + r""" \\[6pt]
-\hline
-\textnormal{Footpath Live Load (if applicable)} & """ + (_render_value(input_dict, KEY_LL_FOOTPATH_PRESSURE_VALUE, ' kN/m\\textsuperscript{2}')) + r""" \\[6pt]
-\hline
-\end{longtable}
-
+""" + vehicle_table + r"""
+\vspace{1em}
+""" + footpath_table + r"""
+\vspace{1em}
+""" + ll_factors_table + r"""
 \vspace{1em}
 \begin{longtable}{|L{5.5cm}|p{10.0cm}|}
 \caption{\textbf{Wind Load (WL) --- per IRC 6}}

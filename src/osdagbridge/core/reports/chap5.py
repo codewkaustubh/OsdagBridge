@@ -141,11 +141,17 @@ from osdagbridge.core.utils.common import (
     KEY_UTIL_SHEAR
 )
 
-from osdagbridge.core.reports.report_utils import _tex, _render_value, get_girder_entries
+from osdagbridge.core.reports.report_utils import (
+    _fig_embed,
+    _render_value,
+    _tex,
+    get_girder_entries,
+)
+from osdagbridge.core.reports.styles import NEEDSPACE_SECTION
 
 if TYPE_CHECKING:
     pass
-def ch5_design_checks(checks_data, bridge) -> str:
+def ch5_design_checks(checks_data, bridge, fig_paths=None) -> str:
     """Chapter 5 — Design Checks.
 
     Parameters
@@ -155,6 +161,7 @@ def ch5_design_checks(checks_data, bridge) -> str:
     bridge : ReportDataBridge
         Provides input_dict, output_dict, and helper methods.
     """
+    fig_paths = fig_paths or {}
     girder_entries = get_girder_entries(bridge.input_dict)
     if not girder_entries:
         n = int(bridge.input_dict.get(KEY_TS_NO_OF_GIRDERS, 1))
@@ -1499,6 +1506,14 @@ End diaphragms at the supports transfer transverse loads to the bearings, restra
 \hline
 """ + t522_content + r"""
 \end{longtable}
+\Needspace{""" + NEEDSPACE_SECTION + r"""}
+\subsection{Utilization Ratio (UR) Chart}
+""" + _fig_embed(
+        fig_paths.get("ur_summary"),
+        "Utilization ratio by component. The red dashed line marks UR = 1.0.",
+        width=r"0.9\textwidth",
+        height=r"0.36\textheight",
+    ) + r"""
 \noindent\textit{Note: UR = Demand / Capacity. All values $\leq 1.0$ indicate passing checks. The governing check for each component is highlighted in the individual design check sections above.}
 
 """

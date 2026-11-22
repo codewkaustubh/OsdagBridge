@@ -1,4 +1,9 @@
-def ch7_quantities(input_dict):
+from osdagbridge.core.reports.report_utils import _fig_embed
+from osdagbridge.core.reports.styles import NEEDSPACE_SECTION
+
+
+def ch7_quantities(input_dict, fig_paths=None):
+    fig_paths = fig_paths or {}
     return r"""
 \chapter{Material Take-off \& Quantity Summary}
 \label{ch:material-takeoff}
@@ -19,6 +24,8 @@ def ch7_quantities(input_dict):
 \hline
 2(c) & Cross Bracing - Diagonal Chord & """ + str(input_dict.get("bracing_diag_vol_formula", "N.A.")) + r""" & """ + str(input_dict.get("bracing_diag_qty", "N.A.")) + r""" & """ + str(input_dict.get("bracing_diag_vol_total", "N.A.")) + r""" & """ + str(input_dict.get("bracing_diag_wt_single", "N.A.")) + r""" & """ + str(input_dict.get("bracing_diag_wt_total", "N.A.")) + r""" \\
 \hline
+2(d) & End Diaphragms & """ + str(input_dict.get("end_diaphragm_vol_formula", "N.A.")) + r""" & """ + str(input_dict.get("end_diaphragm_qty", "N.A.")) + r""" & """ + str(input_dict.get("end_diaphragm_vol_total", "N.A.")) + r""" & """ + str(input_dict.get("end_diaphragm_wt_single", "N.A.")) + r""" & """ + str(input_dict.get("end_diaphragm_wt_total", "N.A.")) + r""" \\
+\hline
 3 & Concrete (M40) for Deck Slab & """ + str(input_dict.get("concrete_deck_vol_formula", "N.A.")) + r""" & """ + str(input_dict.get("concrete_deck_qty", "N.A.")) + r""" & """ + str(input_dict.get("concrete_deck_vol_total", "N.A.")) + r""" & """ + str(input_dict.get("concrete_deck_wt_single", "N.A.")) + r""" & """ + str(input_dict.get("concrete_deck_wt_total", "N.A.")) + r""" \\
 \hline
 4 & Reinforcement Steel (Fe 500) & """ + str(input_dict.get("rebar_deck_vol_formula", "N.A.")) + r""" & """ + str(input_dict.get("rebar_deck_qty", "N.A.")) + r""" & """ + str(input_dict.get("rebar_deck_vol_total", "N.A.")) + r""" & """ + str(input_dict.get("rebar_deck_wt_single", "N.A.")) + r""" & """ + str(input_dict.get("rebar_deck_wt_total", "N.A.")) + r""" \\
@@ -28,6 +35,22 @@ def ch7_quantities(input_dict):
 6 & Crash Barrier & """ + str(input_dict.get("crash_barrier_vol_formula", "N.A.")) + r""" & """ + str(input_dict.get("crash_barrier_qty", "N.A.")) + r""" & """ + str(input_dict.get("crash_barrier_vol_total", "N.A.")) + r""" & """ + str(input_dict.get("crash_barrier_wt_single", "N.A.")) + r""" & """ + str(input_dict.get("crash_barrier_wt_total", "N.A.")) + r""" \\
 \hline
 \end{longtable}
-"""
+""" + r"""
+\Needspace{""" + NEEDSPACE_SECTION + r"""}
+\subsection{Material Quantity Charts}
+""" + _fig_embed(
+        fig_paths.get("material_steel"),
+        "Structural steel tonnage by component (MT)",
+        width=r"0.9\textwidth",
+        height=r"0.32\textheight",
+    ) + r"""
+
+\Needspace{""" + NEEDSPACE_SECTION + r"""}
+""" + _fig_embed(
+        fig_paths.get("material_concrete_rebar"),
+        "Concrete deck volume (m^3) and reinforcement steel weight (MT)",
+        width=r"0.9\textwidth",
+        height=r"0.32\textheight",
+    ) + "\n"
 
 

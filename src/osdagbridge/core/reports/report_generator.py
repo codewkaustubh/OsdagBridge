@@ -129,6 +129,28 @@ from .chap6 import ch6_drawings
 from .chap7 import ch7_quantities
 from .chap8 import ch8_design_log
 from .chap9 import references
+from .charts import render_report_charts
+from .styles import (
+    LONGTABLE_POST_SKIP,
+    LONGTABLE_PRE_SKIP,
+    NEEDSPACE_CHAPTER,
+    NEEDSPACE_SECTION,
+    NEEDSPACE_TABLE,
+    OSDAG_GREEN,
+    PAGE_BOTTOM_MARGIN,
+    PAGE_FOOTER_SKIP,
+    PAGE_MARGIN,
+    STATUS_FAIL,
+    STATUS_NEUTRAL,
+    STATUS_PASS,
+    STATUS_WARNING,
+    TABLE_ARRAY_STRETCH,
+    TABLE_COLUMN_PADDING,
+    TABLE_EXTRA_ROW_HEIGHT,
+    TABLE_ROW_VERTICAL_PADDING,
+    THRESHOLD_REFERENCE,
+    repeat_longtable_headers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +178,7 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \documentclass[12pt,a4paper]{report}
 
 % Packages
-\usepackage[a4paper, margin=1in]{geometry}
+\usepackage[a4paper, left=""" + PAGE_MARGIN + r""", right=""" + PAGE_MARGIN + r""", top=""" + PAGE_MARGIN + r""", bottom=""" + PAGE_BOTTOM_MARGIN + r""", footskip=""" + PAGE_FOOTER_SKIP + r"""]{geometry}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -193,20 +215,28 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \numberwithin{table}{chapter}
 \numberwithin{figure}{chapter}
 % Table layout and spacing: consistent padding, row height, and longtable pre/post skips
-\setlength{\tabcolsep}{6pt}
-\renewcommand{\arraystretch}{1.12}
-\setlength{\LTpre}{0pt}
-\setlength{\LTpost}{6pt}
+\setlength{\tabcolsep}{""" + TABLE_COLUMN_PADDING + r"""}
+\renewcommand{\arraystretch}{""" + str(TABLE_ARRAY_STRETCH) + r"""}
+\setlength{\LTpre}{""" + LONGTABLE_PRE_SKIP + r"""}
+\setlength{\LTpost}{""" + LONGTABLE_POST_SKIP + r"""}
 % Table rules (outline thickness) and small extra row height for clarity
 \setlength{\arrayrulewidth}{0.5pt}
-\setlength{\extrarowheight}{0.6pt}
+\setlength{\extrarowheight}{""" + TABLE_EXTRA_ROW_HEIGHT + r"""}
+\newcommand{\ReportRowPadding}{""" + TABLE_ROW_VERTICAL_PADDING + r"""}
 
-% Prevent tables from overflowing past the page bottom:
-% if fewer than 5 baseline-skips remain, break to the next page first.
-\BeforeBeginEnvironment{table}{\needspace{5\baselineskip}}
-\BeforeBeginEnvironment{longtable}{\needspace{5\baselineskip}}
+\BeforeBeginEnvironment{table}{\Needspace{""" + NEEDSPACE_TABLE + r"""}}
+\BeforeBeginEnvironment{longtable}{\Needspace{""" + NEEDSPACE_TABLE + r"""}}
+\pretocmd{\chapter}{\Needspace{""" + NEEDSPACE_CHAPTER + r"""}}
+  {}{}
+\pretocmd{\section}{\Needspace{""" + NEEDSPACE_SECTION + r"""}}
+  {}{}
 
-\definecolor{osdagGreen}{HTML}{91B014}
+\definecolor{osdagGreen}{HTML}{""" + OSDAG_GREEN + r"""}
+\definecolor{statusPass}{HTML}{""" + STATUS_PASS.lstrip("#") + r"""}
+\definecolor{statusWarning}{HTML}{""" + STATUS_WARNING.lstrip("#") + r"""}
+\definecolor{statusFail}{HTML}{""" + STATUS_FAIL.lstrip("#") + r"""}
+\definecolor{statusNeutral}{HTML}{""" + STATUS_NEUTRAL.lstrip("#") + r"""}
+\definecolor{urThreshold}{HTML}{""" + THRESHOLD_REFERENCE.lstrip("#") + r"""}
 
 \fancypagestyle{main}{
   \fancyhf{}
@@ -429,6 +459,9 @@ class ReportFigures:
     defl_ll:         Optional[str] = None
     shear_connector: Optional[str] = None
     cross_bracing:   Optional[str] = None
+    ur_summary:      Optional[str] = None
+    material_steel:  Optional[str] = None
+    material_concrete_rebar: Optional[str] = None
 
 @dataclass
 class ReportPayload:
@@ -833,6 +866,7 @@ _FIGURE_MAP = [
     ('defl_ll',               'defl_ll.png'),
 ]
 
+
 def generate_report(payload, request):
     # type: (ReportPayload, ReportRequest) -> ReportResult
     """Compile the full OsdagBridge Design Report to PDF (+ .tex source)."""
@@ -863,6 +897,12 @@ def generate_report(payload, request):
 
         # Write to temp dir first, compile there, then copy back
         with tempfile.TemporaryDirectory() as tmp_dir:
+
+            quantities = calculate_material_quantities(payload.inputs, payload.output_dict)
+            payload.inputs.update(quantities)
+            bridge = ReportDataBridge(payload.output_dict, payload.inputs, payload)
+
+            payload.figure_data.update(render_report_charts(bridge, payload.inputs))
 
             # ── Write figure bytes into tmp_dir/images/ then free RAM immediately ──
             tmp_images = os.path.join(tmp_dir, 'images')
@@ -895,12 +935,7 @@ def generate_report(payload, request):
                 shutil.copy2(org_logo_src, os.path.join(tmp_assets, 'org_logo.png'))
                 org_logo_latex = 'assets/org_logo.png'
 
-            # Compute and inject quantities for Chapter 7
-            quantities = calculate_material_quantities(payload.inputs, payload.output_dict)
-            payload.inputs.update(quantities)
-
             # ── Assemble LaTeX document (fig_paths now has tmp_dir paths) ──
-            bridge = ReportDataBridge(payload.output_dict, payload.inputs, payload)
             span_m = float(payload.inputs.get(KEY_SPAN, 0) or 0)
 
             doc_parts = []
@@ -924,11 +959,11 @@ def generate_report(payload, request):
             if 'analysis' in secs:
                 doc_parts.append(ch4_analysis(payload.analysis_summary, fig_paths, bridge, span_m))
             if 'design_checks' in secs:
-                doc_parts.append(ch5_design_checks(payload.design_checks, bridge))
+                doc_parts.append(ch5_design_checks(payload.design_checks, bridge, fig_paths))
             if 'drawings' in secs and payload.options.include_figures:
                 doc_parts.append(ch6_drawings(fig_paths))
 
-            doc_parts.append(ch7_quantities(payload.inputs))
+            doc_parts.append(ch7_quantities(payload.inputs, fig_paths))
 
             mode = str(payload.inputs.get(KEY_DESIGN_MODE, "Optimized")).strip().lower()
             is_custom = mode in {"custom", "customized"}
@@ -939,13 +974,7 @@ def generate_report(payload, request):
             doc_parts.append(references())
             doc_parts.append(r"\end{document}")
 
-            full_tex = "\n".join(doc_parts)
-
-
-            # NOTE: longtable header repetition is handled per-table in each
-            # chapter file (e.g. \endfirsthead / \endhead).  No automatic
-            # post-processing is applied here to avoid mis-ordering captions
-            # and column headings.
+            full_tex = repeat_longtable_headers("\n".join(doc_parts))
 
             tmp_tex = os.path.join(tmp_dir, request.file_stem + '.tex')
             tmp_pdf = os.path.join(tmp_dir, request.file_stem + '.pdf')
